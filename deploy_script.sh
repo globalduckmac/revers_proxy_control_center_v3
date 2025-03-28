@@ -269,21 +269,23 @@ def inject_now():
 # Регистрация всех маршрутов
 def register_blueprints(app):
     from flask_login import LoginManager
-    from routes.auth import auth_bp
-    from routes.domain import domain_bp
-    from routes.server import server_bp
-    from routes.settings import settings_bp
-    from routes.admin import admin_bp
-    from routes.monitoring import monitoring_bp
-    from routes.glances import glances_bp
+    # Импортируем все маршруты
+    import routes.auth
+    import routes.domain
+    import routes.server
+    import routes.settings
+    import routes.admin
+    import routes.monitoring
+    import routes.glances
     
-    app.register_blueprint(auth_bp)
-    app.register_blueprint(server_bp)
-    app.register_blueprint(domain_bp)
-    app.register_blueprint(settings_bp)
-    app.register_blueprint(admin_bp)
-    app.register_blueprint(monitoring_bp)
-    app.register_blueprint(glances_bp)
+    # Регистрируем маршруты с правильными именами переменных
+    app.register_blueprint(routes.auth.bp)
+    app.register_blueprint(routes.server.bp)
+    app.register_blueprint(routes.domain.bp)
+    app.register_blueprint(routes.settings.bp)
+    app.register_blueprint(routes.admin.bp)
+    app.register_blueprint(routes.monitoring.bp)
+    app.register_blueprint(routes.glances.bp)
     
     login_manager = LoginManager()
     login_manager.login_view = 'auth.login'
