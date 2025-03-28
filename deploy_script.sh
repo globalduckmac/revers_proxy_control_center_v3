@@ -538,7 +538,9 @@ fi
 
 # Настройка Glances для всех серверов
 print_header "Создание скрипта установки Glances"
-cat > "$APP_DIR/install_glances.sh" <<'EOF'
+
+# Создаем скрипт install_glances.sh непосредственно в файловой системе
+sudo tee "$APP_DIR/install_glances.sh" > /dev/null << 'EOFGLANCES'
 #!/bin/bash
 
 # Скрипт для установки Glances на Ubuntu 22.04+ с поддержкой веб-интерфейса
@@ -578,11 +580,11 @@ pip3 install "glances[web]<=5.0"
 echo -e "${GREEN}[INFO]${NC} Установка веб-зависимостей..."
 pip3 install fastapi uvicorn jinja2
 
-# Создаем systemd сервис для Glances
+# Создаем systemd сервис для Glances напрямую
 echo -e "${GREEN}[INFO]${NC} Создание systemd сервиса..."
-# Записываем содержимое сервисного файла во временный файл
-cat > "/tmp/glances.service" << EOFSERVICE
-[Unit]
+
+# Создаем файл сервиса непосредственно
+echo '[Unit]
 Description=Glances monitoring tool (web mode)
 After=network.target
 
@@ -591,12 +593,10 @@ ExecStart=/usr/local/bin/glances -w
 Restart=always
 
 [Install]
-WantedBy=multi-user.target
-EOFSERVICE
+WantedBy=multi-user.target' > /etc/systemd/system/glances.service
 
-# Копируем файл в нужное место с правами root
-sudo cp "/tmp/glances.service" "/etc/systemd/system/glances.service"
-sudo chmod 644 "/etc/systemd/system/glances.service"
+# Устанавливаем правильные разрешения
+chmod 644 /etc/systemd/system/glances.service
 
 # Перезагружаем systemd, включаем и запускаем сервис
 echo -e "${GREEN}[INFO]${NC} Запуск сервиса..."
@@ -658,9 +658,10 @@ echo -e "${GREEN}[INFO]${NC} Журнал: journalctl -u glances.service -f"
 echo -e "${GREEN}[INFO]${NC} ======================================================"
 
 exit 0
-EOF
+EOFGLANCES
 
-chmod +x "$APP_DIR/install_glances.sh"
+# Делаем скрипт исполняемым
+sudo chmod +x "$APP_DIR/install_glances.sh"
 
 # Создание инструмента для диагностики
 print_header "Создание инструмента диагностики"
