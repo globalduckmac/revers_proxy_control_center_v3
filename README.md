@@ -135,3 +135,15 @@ gunicorn --bind 0.0.0.0:5000 main:app
 ## Лицензия
 
 MIT
+## Простая установка
+
+Для быстрой установки системы используйте следующую команду:
+
+```bash
+wget https://raw.githubusercontent.com/globalduckmac/revers_proxy_control_center_v3/main/deploy_script.sh
+chmod +x deploy_script.sh
+sudo ./deploy_script.sh
+```
+
+Скрипт автоматически настроит все необходимые компоненты и запустит систему.
+После установки вы получите данные для входа в систему.
