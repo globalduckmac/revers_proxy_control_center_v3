@@ -334,11 +334,24 @@ class ProxyConfig(db.Model):
 
 class ServerLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    server_id = db.Column(db.Integer, db.ForeignKey('server.id', ondelete='CASCADE'), nullable=False)
+    server_id = db.Column(db.Integer, db.ForeignKey('server.id', ondelete='CASCADE'), nullable=True)  # Nullable для общесистемных событий
     action = db.Column(db.String(64), nullable=False)  # deploy, configure, check, etc.
     status = db.Column(db.String(20), nullable=False)  # success, error
     message = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    
+class DomainLog(db.Model):
+    """Хранит записи о действиях с доменами и изменениях их статуса."""
+    id = db.Column(db.Integer, primary_key=True)
+    domain_id = db.Column(db.Integer, db.ForeignKey('domain.id', ondelete='CASCADE'), nullable=False)
+    action = db.Column(db.String(64), nullable=False)  # ns_check, status_change, etc.
+    status = db.Column(db.String(20), nullable=False)  # success, error, warning
+    message = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Отношение с моделью Domain
+    domain = db.relationship('Domain', backref=db.backref('logs', lazy=True, cascade='all, delete-orphan'))
     
 class ServerMetric(db.Model):
     """Stores monitoring metrics for servers."""
