@@ -105,7 +105,7 @@ source venv/bin/activate
 # Установка Python-зависимостей
 print_header "Установка Python-зависимостей"
 pip install --upgrade pip setuptools wheel
-pip install psycopg2-binary cryptography dnspython email-validator flask flask-login flask-sqlalchemy flask-wtf "glances[web]<=5.0" gunicorn jinja2 paramiko python-telegram-bot pytz requests sqlalchemy werkzeug pymysql
+pip install psycopg2-binary cryptography dnspython email-validator flask flask-login flask-sqlalchemy flask-wtf "glances[web]<=5.0" gunicorn jinja2 paramiko python-telegram-bot pytz requests sqlalchemy werkzeug
 
 # Конфигурация приложения
 print_header "Настройка конфигурации приложения"
@@ -210,10 +210,22 @@ if __name__ == "__main__":
     sys.exit(0 if success else 1)
 EOF
 
+# Настройка config.py для использования PostgreSQL
+print_header "Настройка config.py для использования PostgreSQL"
+if [ -f "$APP_DIR/config.py" ]; then
+    # Заменяем строку с MySQL на PostgreSQL
+    sed -i "s|'mysql://root:password@localhost/reverse_proxy_manager'|'postgresql://rpcc:$DB_PASSWORD@localhost/rpcc'|g" "$APP_DIR/config.py"
+    echo "Файл config.py успешно обновлен для использования PostgreSQL"
+else
+    print_warning "Файл config.py не найден. Пропускаем обновление."
+fi
+
 # Инициализация базы данных и создание админа
 print_header "Инициализация базы данных и создание администратора"
 cd "$APP_DIR"
 source "$APP_DIR/venv/bin/activate"
+# Устанавливаем переменную окружения DATABASE_URL перед запуском
+export DATABASE_URL="postgresql://rpcc:$DB_PASSWORD@localhost/rpcc"
 python "$APP_DIR/init_db.py"
 
 # Настройка Nginx в качестве обратного прокси
