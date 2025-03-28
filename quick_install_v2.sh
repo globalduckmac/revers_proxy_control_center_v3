@@ -45,31 +45,34 @@ if [ -d "/opt/reverse_proxy_control_center" ]; then
     echo -e "2. Удалить существующую установку и установить заново"
     echo -e "3. Отменить установку"
     
-    read -p "Введите ваш выбор (1-3): " choice
-    
-    case "$choice" in
-        1)
-            echo -e "${GREEN}[INFO]${NC} Обновление существующей установки..."
-            ;;
-        2)
-            echo -e "${YELLOW}[ВНИМАНИЕ]${NC} Удаление существующей установки..."
-            systemctl stop reverse_proxy_control_center 2>/dev/null || true
-            systemctl disable reverse_proxy_control_center 2>/dev/null || true
-            rm -rf /opt/reverse_proxy_control_center
-            rm -f /etc/systemd/system/reverse_proxy_control_center.service
-            rm -rf /etc/systemd/system/reverse_proxy_control_center.service.d
-            systemctl daemon-reload
-            echo -e "${GREEN}[INFO]${NC} Существующая установка удалена."
-            ;;
-        3)
-            echo -e "${YELLOW}[INFO]${NC} Установка отменена по запросу пользователя."
-            exit 0
-            ;;
-        *)
-            echo -e "${RED}[ОШИБКА]${NC} Неверный выбор. Выход."
-            exit 1
-            ;;
-    esac
+    while true; do
+        read -p "Введите ваш выбор (1-3): " choice
+        
+        case "$choice" in
+            1)
+                echo -e "${GREEN}[INFO]${NC} Обновление существующей установки..."
+                break
+                ;;
+            2)
+                echo -e "${YELLOW}[ВНИМАНИЕ]${NC} Удаление существующей установки..."
+                systemctl stop reverse_proxy_control_center 2>/dev/null || true
+                systemctl disable reverse_proxy_control_center 2>/dev/null || true
+                rm -rf /opt/reverse_proxy_control_center
+                rm -f /etc/systemd/system/reverse_proxy_control_center.service
+                rm -rf /etc/systemd/system/reverse_proxy_control_center.service.d
+                systemctl daemon-reload
+                echo -e "${GREEN}[INFO]${NC} Существующая установка удалена."
+                break
+                ;;
+            3)
+                echo -e "${YELLOW}[INFO]${NC} Установка отменена по запросу пользователя."
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}[ОШИБКА]${NC} Неверный выбор. Пожалуйста, введите число от 1 до 3."
+                ;;
+        esac
+    done
 fi
 
 # Клонируем репозиторий
