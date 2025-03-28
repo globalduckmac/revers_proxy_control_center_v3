@@ -318,53 +318,97 @@ else
     exit 1
 fi
 
-# Исправляем init_db.py для избежания проблем с MySQL
-print_header "Исправление init_db.py для корректной работы с PostgreSQL"
-cat > "$APP_DIR/init_db.py" <<EOF
-from app import app, db
-from models import User
-from werkzeug.security import generate_password_hash
+# Создаем прямой скрипт для инициализации базы данных без зависимостей
+print_header "Создание прямого скрипта инициализации базы данных"
+cat > "$APP_DIR/simple_init_db.py" <<EOF
+#!/usr/bin/env python3
+"""
+Прямой скрипт для инициализации базы данных и создания администратора
+без каких-либо импортов из приложения.
+"""
+import os
 import sys
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from werkzeug.security import generate_password_hash
+from datetime import datetime
+
+# Получаем строку подключения из переменной окружения или используем параметр
+db_url = os.environ.get('DATABASE_URL', 'postgresql://rpcc:$DB_PASSWORD@localhost/rpcc')
+
+# Создаем engine и базовый класс для моделей
+Base = declarative_base()
+engine = create_engine(db_url)
+Session = sessionmaker(bind=engine)
+session = Session()
+
+# Определяем минимальную модель пользователя
+class User(Base):
+    __tablename__ = 'user'
+    
+    id = Column(Integer, primary_key=True)
+    username = Column(String(64), unique=True, nullable=False)
+    email = Column(String(120), unique=True, nullable=False)
+    password_hash = Column(String(256))
+    is_admin = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_login = Column(DateTime)
+    
+    def __repr__(self):
+        return f'<User {self.username}>'
 
 def init_db():
-    """Инициализация базы данных"""
-    with app.app_context():
-        # Создаем таблицы
-        db.create_all()
-        print("База данных инициализирована")
+    """Создание таблиц в базе данных"""
+    print(f"Подключение к базе данных: {db_url}")
+    try:
+        # Создаем все таблицы
+        Base.metadata.create_all(engine)
+        print("Таблицы успешно созданы")
         return True
+    except Exception as e:
+        print(f"Ошибка при создании таблиц: {e}")
+        return False
 
 def create_admin():
-    """Создание администратора если его нет"""
-    with app.app_context():
-        # Проверяем, существует ли пользователь admin
-        admin = User.query.filter_by(username='admin').first()
+    """Создание администратора"""
+    try:
+        # Проверяем, существует ли администратор
+        admin = session.query(User).filter_by(username='admin').first()
         
         if admin:
-            print("Администратор уже существует. Обновляем пароль...")
-            admin.password_hash = generate_password_hash("$ADMIN_PASSWORD")
+            print("Обновление существующего администратора")
+            admin.password_hash = generate_password_hash('$ADMIN_PASSWORD')
         else:
-            print("Создаем нового администратора...")
+            print("Создание нового администратора")
             admin = User(
                 username='admin',
                 email='admin@example.com',
-                password_hash=generate_password_hash("$ADMIN_PASSWORD"),
-                is_admin=True
+                password_hash=generate_password_hash('$ADMIN_PASSWORD'),
+                is_admin=True,
+                created_at=datetime.utcnow()
             )
-            db.session.add(admin)
+            session.add(admin)
         
-        db.session.commit()
-        print("Администратор успешно создан/обновлен!")
+        session.commit()
+        print("Администратор успешно создан/обновлен")
         return True
-
-if __name__ == "__main__":
-    try:
-        success = init_db() and create_admin()
-        sys.exit(0 if success else 1)
     except Exception as e:
-        print(f"Ошибка: {str(e)}")
+        session.rollback()
+        print(f"Ошибка при создании администратора: {e}")
+        return False
+
+if __name__ == '__main__':
+    print("Начало инициализации базы данных")
+    if init_db() and create_admin():
+        print("Инициализация базы данных успешно завершена")
+        sys.exit(0)
+    else:
+        print("Ошибка при инициализации базы данных")
         sys.exit(1)
 EOF
+
+chmod +x "$APP_DIR/simple_init_db.py"
 
 # Инициализация базы данных и создание админа
 print_header "Инициализация базы данных и создание администратора"
@@ -374,39 +418,56 @@ source "$APP_DIR/venv/bin/activate"
 export DATABASE_URL="postgresql://rpcc:$DB_PASSWORD@localhost/rpcc"
 export FLASK_APP=main.py
 export SQLALCHEMY_DATABASE_URI="postgresql://rpcc:$DB_PASSWORD@localhost/rpcc"
-python "$APP_DIR/init_db.py"
 
-# Если возникла ошибка, попробуем запустить инициализацию напрямую через Python
+# Запускаем прямой скрипт инициализации
+print_header "Запуск прямой инициализации БД (без зависимостей от приложения)"
+python "$APP_DIR/simple_init_db.py"
+
+# Если скрипт не сработал, пробуем напрямую через psql
 if [ $? -ne 0 ]; then
-    print_warning "Ошибка при запуске init_db.py. Пробуем альтернативный способ..."
-    python -c "
-from app import app, db
-from models import User
-from werkzeug.security import generate_password_hash
+    print_warning "Ошибка при запуске скрипта инициализации. Пробуем через SQL..."
+    
+    # Создаем SQL-скрипт для инициализации базы данных
+    cat > /tmp/init_db.sql <<EOF
+-- Создаем таблицу пользователей, если она не существует
+CREATE TABLE IF NOT EXISTS "user" (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(64) NOT NULL UNIQUE,
+    email VARCHAR(120) NOT NULL UNIQUE,
+    password_hash VARCHAR(256),
+    is_admin BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMP WITHOUT TIME ZONE
+);
 
-with app.app_context():
-    # Создаем таблицы
-    db.create_all()
-    print('База данных инициализирована')
+-- Проверяем существование администратора
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM "user" WHERE username = 'admin') THEN
+        -- Добавляем администратора
+        INSERT INTO "user" (username, email, password_hash, is_admin, created_at)
+        VALUES ('admin', 'admin@example.com', '$2b$12$lW.rRKfEaAEAcePFB8N.nuk4XzRPTtA/MvO71hKL2mPyUUGc6nw7i', TRUE, CURRENT_TIMESTAMP);
+        RAISE NOTICE 'Администратор создан';
+    ELSE
+        -- Обновляем пароль администратора
+        UPDATE "user" SET password_hash = '$2b$12$lW.rRKfEaAEAcePFB8N.nuk4XzRPTtA/MvO71hKL2mPyUUGc6nw7i' WHERE username = 'admin';
+        RAISE NOTICE 'Пароль администратора обновлен';
+    END IF;
+END
+\$\$;
+EOF
     
-    # Проверяем наличие администратора
-    admin = User.query.filter_by(username='admin').first()
-    if admin:
-        print('Обновляем пароль администратора')
-        admin.password_hash = generate_password_hash('$ADMIN_PASSWORD')
-    else:
-        print('Создаем нового администратора')
-        admin = User(
-            username='admin',
-            email='admin@example.com',
-            password_hash=generate_password_hash('$ADMIN_PASSWORD'),
-            is_admin=True
-        )
-        db.session.add(admin)
+    # Выполняем SQL-скрипт
+    sudo -u postgres psql -d rpcc -f /tmp/init_db.sql
     
-    db.session.commit()
-    print('Администратор успешно создан/обновлен')
-"
+    # Удаляем временный файл
+    rm /tmp/init_db.sql
+    
+    if [ $? -eq 0 ]; then
+        echo "База данных успешно инициализирована через SQL"
+    else
+        print_error "Ошибка при инициализации базы данных через SQL"
+    fi
 fi
 
 # Настройка Nginx в качестве обратного прокси
