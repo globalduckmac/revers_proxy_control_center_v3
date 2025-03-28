@@ -550,41 +550,36 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# Функции для вывода
-info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; }
-
 # Проверка, запущен ли скрипт от имени root
 if [ "$(id -u)" != "0" ]; then
-    error "Этот скрипт должен быть запущен с правами root (sudo)."
+    echo -e "${RED}[ERROR]${NC} Этот скрипт должен быть запущен с правами root (sudo)."
     exit 1
 fi
 
 # Проверяем, установлен ли Python 3
 if ! command -v python3 &>/dev/null; then
-    info "Python3 не найден. Устанавливаем..."
+    echo -e "${GREEN}[INFO]${NC} Python3 не найден. Устанавливаем..."
     apt-get update
     apt-get install -y python3 python3-pip
 else
-    info "Python3 уже установлен: $(python3 --version)"
+    echo -e "${GREEN}[INFO]${NC} Python3 уже установлен: $(python3 --version)"
 fi
 
 # Устанавливаем pip и зависимости
-info "Установка Python3-pip и зависимостей..."
+echo -e "${GREEN}[INFO]${NC} Установка Python3-pip и зависимостей..."
 apt-get install -y python3-pip curl net-tools lsof jq
 
 # Устанавливаем Glances через pip в совместимой версии
-info "Установка Glances через pip..."
+echo -e "${GREEN}[INFO]${NC} Установка Glances через pip..."
 pip3 install --upgrade pip setuptools wheel
 pip3 install "glances[web]<=5.0"
 
 # Устанавливаем необходимые зависимости для веб-сервера
-info "Установка веб-зависимостей..."
+echo -e "${GREEN}[INFO]${NC} Установка веб-зависимостей..."
 pip3 install fastapi uvicorn jinja2
 
 # Создаем systemd сервис для Glances
-echo "${GREEN}[INFO]${NC} Создание systemd сервиса..."
+echo -e "${GREEN}[INFO]${NC} Создание systemd сервиса..."
 cat > /etc/systemd/system/glances.service << EOF
 [Unit]
 Description=Glances monitoring tool (web mode)
@@ -599,63 +594,63 @@ WantedBy=multi-user.target
 EOF
 
 # Перезагружаем systemd, включаем и запускаем сервис
-echo "${GREEN}[INFO]${NC} Запуск сервиса..."
+echo -e "${GREEN}[INFO]${NC} Запуск сервиса..."
 systemctl daemon-reload
 systemctl enable glances.service
 systemctl start glances.service
 
 # Ждем немного для старта сервиса
-echo "${GREEN}[INFO]${NC} Ожидание запуска сервиса (5 секунд)..."
+echo -e "${GREEN}[INFO]${NC} Ожидание запуска сервиса (5 секунд)..."
 sleep 5
 
 # Проверяем статус сервиса
-echo "${GREEN}[INFO]${NC} Проверка статуса сервиса..."
+echo -e "${GREEN}[INFO]${NC} Проверка статуса сервиса..."
 systemctl status glances.service --no-pager
 
 # Проверяем доступность API и Web-интерфейса
-echo "${GREEN}[INFO]${NC} Проверка доступности API (порт 61208)..."
+echo -e "${GREEN}[INFO]${NC} Проверка доступности API (порт 61208)..."
 if curl -s "http://localhost:61208/api/4/cpu" | grep -q "total"; then
-    echo "${GREEN}[INFO]${NC} ✅ API доступен и работает"
+    echo -e "${GREEN}[INFO]${NC} ✅ API доступен и работает"
 else
-    echo "${YELLOW}[WARN]${NC} ❌ API не отвечает. Проверьте журнал: journalctl -u glances.service"
+    echo -e "${YELLOW}[WARN]${NC} ❌ API не отвечает. Проверьте журнал: journalctl -u glances.service"
     
     # Дополнительная информация о процессе
-    echo "${GREEN}[INFO]${NC} Информация о процессе Glances:"
+    echo -e "${GREEN}[INFO]${NC} Информация о процессе Glances:"
     ps aux | grep -v grep | grep glances || echo "Процесс не найден"
     
     # Информация о прослушиваемых портах
-    echo "${GREEN}[INFO]${NC} Открытые порты:"
+    echo -e "${GREEN}[INFO]${NC} Открытые порты:"
     ss -tulpn | grep 61208 || echo "Порт не прослушивается"
     
     # Пробуем перезапустить сервис
-    echo "${GREEN}[INFO]${NC} Пробуем перезапустить сервис..."
+    echo -e "${GREEN}[INFO]${NC} Пробуем перезапустить сервис..."
     systemctl restart glances.service
     sleep 5
     
     # Проверяем еще раз
     if curl -s "http://localhost:61208/api/4/cpu" | grep -q "total"; then
-        echo "${GREEN}[INFO]${NC} ✅ После перезапуска API стал доступен"
+        echo -e "${GREEN}[INFO]${NC} ✅ После перезапуска API стал доступен"
     else
-        echo "${YELLOW}[WARN]${NC} ❌ API все еще недоступен"
+        echo -e "${YELLOW}[WARN]${NC} ❌ API все еще недоступен"
     fi
 fi
 
-echo "${GREEN}[INFO]${NC} Проверка доступности Web-интерфейса..."
+echo -e "${GREEN}[INFO]${NC} Проверка доступности Web-интерфейса..."
 if curl -s "http://localhost:61208/" | grep -q "Glances"; then
-    echo "${GREEN}[INFO]${NC} ✅ Web-интерфейс доступен и работает"
+    echo -e "${GREEN}[INFO]${NC} ✅ Web-интерфейс доступен и работает"
 else
-    echo "${YELLOW}[WARN]${NC} ❌ Web-интерфейс не отвечает"
+    echo -e "${YELLOW}[WARN]${NC} ❌ Web-интерфейс не отвечает"
 fi
 
 # Информация о сети для облегчения доступа извне
-echo "${GREEN}[INFO]${NC} Внешние интерфейсы:"
+echo -e "${GREEN}[INFO]${NC} Внешние интерфейсы:"
 ip -4 addr show | grep -v 127.0.0.1 | grep inet
 
-echo "${GREEN}[INFO]${NC} ======================================================"
-echo "${GREEN}[INFO]${NC} Установка Glances завершена."
-echo "${GREEN}[INFO]${NC} Web URL и API URL: http://IP_АДРЕС:61208/"
-echo "${GREEN}[INFO]${NC} Журнал: journalctl -u glances.service -f"
-echo "${GREEN}[INFO]${NC} ======================================================"
+echo -e "${GREEN}[INFO]${NC} ======================================================"
+echo -e "${GREEN}[INFO]${NC} Установка Glances завершена."
+echo -e "${GREEN}[INFO]${NC} Web URL и API URL: http://IP_АДРЕС:61208/"
+echo -e "${GREEN}[INFO]${NC} Журнал: journalctl -u glances.service -f"
+echo -e "${GREEN}[INFO]${NC} ======================================================"
 
 exit 0
 EOF
