@@ -539,7 +539,25 @@ fi
 # Настройка Glances для всех серверов
 print_header "Создание скрипта установки Glances"
 
-# Создаем скрипт install_glances.sh непосредственно в файловой системе
+# Сначала создаем файл сервиса Glances напрямую
+print_header "Создание systemd сервисного файла для Glances"
+sudo tee /etc/systemd/system/glances.service > /dev/null << 'EOF'
+[Unit]
+Description=Glances monitoring tool (web mode)
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/glances -w
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Устанавливаем правильные разрешения
+sudo chmod 644 /etc/systemd/system/glances.service
+
+# Создаем упрощенный скрипт установки Glances без создания сервисного файла
 sudo tee "$APP_DIR/install_glances.sh" > /dev/null << 'EOFGLANCES'
 #!/bin/bash
 
@@ -580,29 +598,11 @@ pip3 install "glances[web]<=5.0"
 echo -e "${GREEN}[INFO]${NC} Установка веб-зависимостей..."
 pip3 install fastapi uvicorn jinja2
 
-# Создаем systemd сервис для Glances напрямую
-echo -e "${GREEN}[INFO]${NC} Создание systemd сервиса..."
-
-# Создаем файл сервиса непосредственно
-echo '[Unit]
-Description=Glances monitoring tool (web mode)
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/glances -w
-Restart=always
-
-[Install]
-WantedBy=multi-user.target' > /etc/systemd/system/glances.service
-
-# Устанавливаем правильные разрешения
-chmod 644 /etc/systemd/system/glances.service
-
 # Перезагружаем systemd, включаем и запускаем сервис
 echo -e "${GREEN}[INFO]${NC} Запуск сервиса..."
 systemctl daemon-reload
 systemctl enable glances.service
-systemctl start glances.service
+systemctl restart glances.service
 
 # Ждем немного для старта сервиса
 echo -e "${GREEN}[INFO]${NC} Ожидание запуска сервиса (5 секунд)..."
