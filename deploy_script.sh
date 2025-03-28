@@ -580,7 +580,8 @@ pip3 install fastapi uvicorn jinja2
 
 # Создаем systemd сервис для Glances
 echo -e "${GREEN}[INFO]${NC} Создание systemd сервиса..."
-cat > /etc/systemd/system/glances.service << EOF
+# Записываем содержимое сервисного файла во временный файл
+cat > "/tmp/glances.service" << EOFSERVICE
 [Unit]
 Description=Glances monitoring tool (web mode)
 After=network.target
@@ -591,7 +592,11 @@ Restart=always
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOFSERVICE
+
+# Копируем файл в нужное место с правами root
+sudo cp "/tmp/glances.service" "/etc/systemd/system/glances.service"
+sudo chmod 644 "/etc/systemd/system/glances.service"
 
 # Перезагружаем systemd, включаем и запускаем сервис
 echo -e "${GREEN}[INFO]${NC} Запуск сервиса..."
