@@ -279,6 +279,18 @@ class BackgroundTasks:
                 # Получаем все домены с указанными ожидаемыми NS
                 domains = Domain.query.filter(Domain.expected_nameservers.isnot(None)).all()
                 
+                # Добавляем запись в общий журнал активности о запуске проверки NS доменов
+                from models import ServerLog
+                activity_log = ServerLog(
+                    server_id=None,  # Используем None для общесистемных событий
+                    action='domain_ns_check_batch',
+                    status='success',
+                    message=f"Запущена автоматическая проверка NS-записей для {len(domains)} доменов"
+                )
+                db.session.add(activity_log)
+                db.session.commit()
+                logger.info(f"Started batch NS check for {len(domains)} domains")
+                
                 for domain in domains:
                     try:
                         # Запоминаем текущий статус
@@ -290,30 +302,41 @@ class BackgroundTasks:
                         # Получаем обновленный домен
                         domain = Domain.query.get(domain.id)
                         
-                        # Если статус изменился, отправляем уведомление
-                        if old_status != domain.ns_status and TelegramNotifier.is_configured():
-                            try:
-                                loop = asyncio.new_event_loop()
-                                asyncio.set_event_loop(loop)
-                                
+                        # Если статус изменился, добавляем запись в лог и отправляем уведомление
+                        if old_status != domain.ns_status:
+                            # Добавляем запись в лог об изменении статуса
+                            from models import DomainLog
+                            log = DomainLog(
+                                domain_id=domain.id,
+                                action='ns_status_change',
+                                status='success' if domain.ns_status == 'active' else 'warning' if domain.ns_status == 'warning' else 'error',
+                                message=f"Domain NS status changed from {old_status} to {domain.ns_status}"
+                            )
+                            db.session.add(log)
+                            db.session.commit()
+                            
+                            # Маскируем домен для логирования
+                            from modules.telegram_notifier import mask_domain_name
+                            masked_domain_name = mask_domain_name(domain.name)
+                            logger.info(f"Domain NS status change logged for {masked_domain_name}: {old_status} -> {domain.ns_status}")
+                            
+                            # Отправляем уведомление, если настроен Telegram
+                            if TelegramNotifier.is_configured():
                                 try:
-                                    # Получаем маскированное имя домена для логирования
-                                    from modules.telegram_notifier import mask_domain_name
-                                    masked_domain_name = mask_domain_name(domain.name)
+                                    loop = asyncio.new_event_loop()
+                                    asyncio.set_event_loop(loop)
                                     
-                                    loop.run_until_complete(
-                                        TelegramNotifier.notify_domain_ns_status_change(
-                                            domain, old_status, domain.ns_status
+                                    try:
+                                        loop.run_until_complete(
+                                            TelegramNotifier.notify_domain_ns_status_change(
+                                                domain, old_status, domain.ns_status
+                                            )
                                         )
-                                    )
-                                    logger.info(f"Domain NS status notification sent for {masked_domain_name}")
-                                finally:
-                                    loop.close()
-                            except Exception as e:
-                                # Маскируем домен даже в сообщениях об ошибках
-                                from modules.telegram_notifier import mask_domain_name
-                                masked_domain_name = mask_domain_name(domain.name)
-                                logger.error(f"Error sending domain NS status notification for {masked_domain_name}: {str(e)}")
+                                        logger.info(f"Domain NS status notification sent for {masked_domain_name}")
+                                    finally:
+                                        loop.close()
+                                except Exception as e:
+                                    logger.error(f"Error sending domain NS status notification for {masked_domain_name}: {str(e)}")
                         
                     except Exception as e:
                         # Маскируем домен даже в сообщениях об ошибках

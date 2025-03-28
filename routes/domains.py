@@ -2,8 +2,9 @@ import logging
 import os
 from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify
 from flask_login import login_required
-from models import Domain, DomainGroup, db
+from models import Domain, DomainGroup, DomainLog, db
 from modules.domain_manager import DomainManager
+from datetime import datetime, timedelta
 
 bp = Blueprint('domains', __name__, url_prefix='/domains')
 logger = logging.getLogger(__name__)
@@ -286,6 +287,22 @@ def check_ns(domain_id):
         return redirect(url_for('domains.index'))
     
     try:
+        # Добавляем запись в общий журнал активности о ручной проверке NS для одного домена
+        try:
+            from models import ServerLog
+            activity_log = ServerLog(
+                server_id=None,  # Используем None для общесистемных событий
+                action='domain_ns_check_single_manual',
+                status='success',
+                message=f"Запущена ручная проверка NS-записей для домена {mask_domain_name(domain.name)} (ID: {domain_id})"
+            )
+            db.session.add(activity_log)
+            db.session.commit()
+            logger.info(f"Added activity log for manual check of domain {domain_id}")
+        except Exception as log_error:
+            logger.error(f"Error adding activity log for single domain NS check: {str(log_error)}")
+            db.session.rollback()  # Rollback if there was an error
+
         # Выполняем проверку в отдельном блоке
         result = DomainManager.check_domain_ns_status(domain_id)
         
@@ -328,6 +345,26 @@ def check_all_ns():
     logger.info("Начинаем проверку NS-записей всех доменов")
     
     try:
+        # Добавляем запись в общий журнал активности о ручном запуске проверки NS доменов
+        try:
+            from models import ServerLog
+            # Найдем количество доменов с заданными NS
+            from models import Domain
+            domains_to_check = Domain.query.filter(Domain.expected_nameservers.isnot(None)).all()
+            
+            activity_log = ServerLog(
+                server_id=None,  # Используем None для общесистемных событий
+                action='domain_ns_check_batch_manual',
+                status='success',
+                message=f"Запущена ручная проверка NS-записей для {len(domains_to_check)} доменов"
+            )
+            db.session.add(activity_log)
+            db.session.commit()
+            logger.info(f"Added activity log for manual check of {len(domains_to_check)} domains")
+        except Exception as log_error:
+            logger.error(f"Error adding activity log for NS check: {str(log_error)}")
+            db.session.rollback()  # Rollback if there was an error
+        
         # Выполняем проверку с отельной обработкой отката транзакций
         try:
             results = DomainManager.check_all_domains_ns_status()
@@ -475,6 +512,79 @@ def api_check_nameservers(domain_name):
             'success': False,
             'error': 'Ошибка при проверке NS-записей. Пожалуйста, попробуйте позже.'
         }), 500
+
+
+@bp.route('/<int:domain_id>/ns-logs', methods=['GET'])
+@login_required
+def domain_ns_logs(domain_id):
+    """Просмотр логов NS-проверок для конкретного домена."""
+    try:
+        # Получаем домен
+        domain = Domain.query.get_or_404(domain_id)
+        
+        # Маскируем домен для логирования
+        from modules.telegram_notifier import mask_domain_name
+        masked_domain_name = mask_domain_name(domain.name)
+        
+        # Получаем параметры фильтрации из запроса
+        action = request.args.get('action')
+        status = request.args.get('status')
+        date_range = request.args.get('date_range', '30')  # По умолчанию - 30 дней
+        
+        # Создаем базовый запрос
+        logs_query = DomainLog.query.filter_by(domain_id=domain_id)
+        
+        # Применяем фильтры
+        if action:
+            logs_query = logs_query.filter_by(action=action)
+        if status:
+            logs_query = logs_query.filter_by(status=status)
+        
+        # Применяем фильтр по дате
+        if date_range != 'all':
+            if date_range.isdigit():
+                days = int(date_range)
+                date_from = datetime.utcnow() - timedelta(days=days)
+                logs_query = logs_query.filter(DomainLog.created_at >= date_from)
+        
+        # Сортируем по дате в обратном порядке
+        logs_query = logs_query.order_by(DomainLog.created_at.desc())
+        
+        # Получаем логи
+        logs = logs_query.all()
+        
+        # Получаем уникальные значения для фильтров
+        actions = db.session.query(DomainLog.action).distinct().all()
+        actions = [action[0] for action in actions]
+        
+        # Собираем статистику
+        stats = {
+            'total': len(logs),
+            'success': sum(1 for log in logs if log.status == 'success'),
+            'warning': sum(1 for log in logs if log.status == 'warning'),
+            'error': sum(1 for log in logs if log.status == 'error')
+        }
+        
+        # Топ действий для статистики
+        from collections import Counter
+        action_counter = Counter(log.action for log in logs)
+        top_actions = action_counter.most_common(5)
+        
+        return render_template('domains/ns_logs.html',
+                              domain=domain,
+                              logs=logs,
+                              actions=actions,
+                              stats=stats,
+                              top_actions=top_actions,
+                              selected_action=action,
+                              selected_status=status,
+                              selected_date_range=date_range,
+                              masked_domain_name=masked_domain_name)
+    except Exception as e:
+        logger.error(f"Ошибка при просмотре логов NS-проверок для домена {domain_id}: {str(e)}")
+        flash(f'Ошибка при загрузке логов NS-проверок: {str(e)}', 'danger')
+        return redirect(url_for('domains.index'))
+
 
 @bp.route('/<int:domain_id>/ffpanel', methods=['GET', 'POST'])
 @login_required
