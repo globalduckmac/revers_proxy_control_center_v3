@@ -210,8 +210,10 @@ if __name__ == "__main__":
     sys.exit(0 if success else 1)
 EOF
 
-# Настройка config.py для использования PostgreSQL
-print_header "Настройка config.py для использования PostgreSQL"
+# Настройка файлов проекта для использования PostgreSQL
+print_header "Настройка файлов для использования PostgreSQL"
+
+# Обновляем config.py для использования PostgreSQL
 if [ -f "$APP_DIR/config.py" ]; then
     # Заменяем строку с MySQL на PostgreSQL
     sed -i "s|'mysql://root:password@localhost/reverse_proxy_manager'|'postgresql://rpcc:$DB_PASSWORD@localhost/rpcc'|g" "$APP_DIR/config.py"
@@ -220,13 +222,190 @@ else
     print_warning "Файл config.py не найден. Пропускаем обновление."
 fi
 
+# Принудительно исправляем app.py для прямого подключения к PostgreSQL
+if [ -f "$APP_DIR/app.py" ]; then
+    print_header "Исправление app.py для прямого использования PostgreSQL"
+    # Создаем резервную копию оригинального файла
+    cp "$APP_DIR/app.py" "$APP_DIR/app.py.backup"
+    
+    # Заменяем настройки подключения к базе данных в app.py
+    cat > "$APP_DIR/app.py" <<EOF
+import os
+from datetime import datetime
+
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm import DeclarativeBase
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+db = SQLAlchemy(model_class=Base)
+app = Flask(__name__)
+
+# Настройка секретного ключа
+app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-key")
+
+# Настройка подключения к базе данных PostgreSQL
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "postgresql://rpcc:$DB_PASSWORD@localhost/rpcc")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_recycle": 300,
+    "pool_pre_ping": True,
+}
+
+# Инициализация приложения с расширением
+db.init_app(app)
+
+
+# Функция для добавления текущей даты/времени в шаблоны
+@app.context_processor
+def inject_now():
+    return dict(now=datetime.utcnow())
+
+
+# Регистрация всех маршрутов
+def register_blueprints(app):
+    from flask_login import LoginManager
+    from routes.auth import auth_bp
+    from routes.domain import domain_bp
+    from routes.server import server_bp
+    from routes.settings import settings_bp
+    from routes.admin import admin_bp
+    from routes.monitoring import monitoring_bp
+    from routes.glances import glances_bp
+    
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(server_bp)
+    app.register_blueprint(domain_bp)
+    app.register_blueprint(settings_bp)
+    app.register_blueprint(admin_bp)
+    app.register_blueprint(monitoring_bp)
+    app.register_blueprint(glances_bp)
+    
+    login_manager = LoginManager()
+    login_manager.login_view = 'auth.login'
+    login_manager.init_app(app)
+    
+    from models import User
+    
+    @login_manager.user_loader
+    def load_user(user_id):
+        return User.query.get(int(user_id))
+
+
+register_blueprints(app)
+
+with app.app_context():
+    # Импортируем модели здесь, чтобы их таблицы были созданы
+    import models  # noqa: F401
+    
+    # Создаем таблицы в базе данных
+    try:
+        db.create_all()
+        print("База данных инициализирована успешно")
+    except Exception as e:
+        print(f"Ошибка инициализации базы данных: {e}")
+EOF
+    
+    echo "Файл app.py успешно обновлен для использования PostgreSQL"
+else
+    print_error "Файл app.py не найден! Критическая ошибка."
+    exit 1
+fi
+
+# Исправляем init_db.py для избежания проблем с MySQL
+print_header "Исправление init_db.py для корректной работы с PostgreSQL"
+cat > "$APP_DIR/init_db.py" <<EOF
+from app import app, db
+from models import User
+from werkzeug.security import generate_password_hash
+import sys
+
+def init_db():
+    """Инициализация базы данных"""
+    with app.app_context():
+        # Создаем таблицы
+        db.create_all()
+        print("База данных инициализирована")
+        return True
+
+def create_admin():
+    """Создание администратора если его нет"""
+    with app.app_context():
+        # Проверяем, существует ли пользователь admin
+        admin = User.query.filter_by(username='admin').first()
+        
+        if admin:
+            print("Администратор уже существует. Обновляем пароль...")
+            admin.password_hash = generate_password_hash("$ADMIN_PASSWORD")
+        else:
+            print("Создаем нового администратора...")
+            admin = User(
+                username='admin',
+                email='admin@example.com',
+                password_hash=generate_password_hash("$ADMIN_PASSWORD"),
+                is_admin=True
+            )
+            db.session.add(admin)
+        
+        db.session.commit()
+        print("Администратор успешно создан/обновлен!")
+        return True
+
+if __name__ == "__main__":
+    try:
+        success = init_db() and create_admin()
+        sys.exit(0 if success else 1)
+    except Exception as e:
+        print(f"Ошибка: {str(e)}")
+        sys.exit(1)
+EOF
+
 # Инициализация базы данных и создание админа
 print_header "Инициализация базы данных и создание администратора"
 cd "$APP_DIR"
 source "$APP_DIR/venv/bin/activate"
 # Устанавливаем переменную окружения DATABASE_URL перед запуском
 export DATABASE_URL="postgresql://rpcc:$DB_PASSWORD@localhost/rpcc"
+export FLASK_APP=main.py
+export SQLALCHEMY_DATABASE_URI="postgresql://rpcc:$DB_PASSWORD@localhost/rpcc"
 python "$APP_DIR/init_db.py"
+
+# Если возникла ошибка, попробуем запустить инициализацию напрямую через Python
+if [ $? -ne 0 ]; then
+    print_warning "Ошибка при запуске init_db.py. Пробуем альтернативный способ..."
+    python -c "
+from app import app, db
+from models import User
+from werkzeug.security import generate_password_hash
+
+with app.app_context():
+    # Создаем таблицы
+    db.create_all()
+    print('База данных инициализирована')
+    
+    # Проверяем наличие администратора
+    admin = User.query.filter_by(username='admin').first()
+    if admin:
+        print('Обновляем пароль администратора')
+        admin.password_hash = generate_password_hash('$ADMIN_PASSWORD')
+    else:
+        print('Создаем нового администратора')
+        admin = User(
+            username='admin',
+            email='admin@example.com',
+            password_hash=generate_password_hash('$ADMIN_PASSWORD'),
+            is_admin=True
+        )
+        db.session.add(admin)
+    
+    db.session.commit()
+    print('Администратор успешно создан/обновлен')
+"
+fi
 
 # Настройка Nginx в качестве обратного прокси
 print_header "Настройка Nginx обратного прокси"
